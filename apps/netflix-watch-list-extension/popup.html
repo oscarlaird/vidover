@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Netflix Watch List</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">
+        <span class="logo-n">N</span>
+        <span class="logo-text">Watch List</span>
+      </div>
+      <span id="now-watching-badge" class="now-watching hidden">● Live</span>
+    </header>
+
+    <div id="timestamp-section" class="hidden">
+      <div class="section-label">Timestamp</div>
+      <div class="timestamp-display">
+        <span id="ts-current" class="ts-current">—</span>
+        <span class="ts-sep">/</span>
+        <span id="ts-duration" class="ts-duration">—</span>
+      </div>
+      <div class="progress-track">
+        <div id="ts-bar" class="progress-bar" style="width:0%"></div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div id="player-section" class="hidden">
+      <div class="section-label">Player Region</div>
+      <div class="player-grid">
+        <div class="player-stat">
+          <span class="stat-label">Width</span>
+          <span class="stat-value" id="p-width">—</span>
+        </div>
+        <div class="player-stat">
+          <span class="stat-label">Height</span>
+          <span class="stat-value" id="p-height">—</span>
+        </div>
+        <div class="player-stat">
+          <span class="stat-label">X (left)</span>
+          <span class="stat-value" id="p-x">—</span>
+        </div>
+        <div class="player-stat">
+          <span class="stat-label">Y (top)</span>
+          <span class="stat-value" id="p-y">—</span>
+        </div>
+        <div class="player-stat">
+          <span class="stat-label">Right</span>
+          <span class="stat-value" id="p-right">—</span>
+        </div>
+        <div class="player-stat">
+          <span class="stat-label">Bottom</span>
+          <span class="stat-value" id="p-bottom">—</span>
+        </div>
+      </div>
+
+      <div id="video-section" class="hidden">
+        <div class="subsection-label">Video Content <span id="v-aspect" class="aspect-tag"></span></div>
+        <div class="player-grid">
+          <div class="player-stat highlight">
+            <span class="stat-label">Width</span>
+            <span class="stat-value" id="v-width">—</span>
+          </div>
+          <div class="player-stat highlight">
+            <span class="stat-label">Height</span>
+            <span class="stat-value" id="v-height">—</span>
+          </div>
+          <div class="player-stat highlight">
+            <span class="stat-label">X (left)</span>
+            <span class="stat-value" id="v-x">—</span>
+          </div>
+          <div class="player-stat highlight">
+            <span class="stat-label">Y (top)</span>
+            <span class="stat-value" id="v-y">—</span>
+          </div>
+          <div class="player-stat highlight">
+            <span class="stat-label">Right</span>
+            <span class="stat-value" id="v-right">—</span>
+          </div>
+          <div class="player-stat highlight">
+            <span class="stat-label">Bottom</span>
+            <span class="stat-value" id="v-bottom">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div id="list-section">
+      <div class="list-header">
+        <span class="list-title">Saved Titles</span>
+        <span id="count" class="count">0</span>
+      </div>
+      <ul id="watch-list"></ul>
+      <div id="empty-state" class="empty-state hidden">
+        <p>No titles saved yet.</p>
+        <p class="hint">Start watching something on Netflix and it will be added automatically.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

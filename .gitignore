@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local media, generated outputs, temporary clips, and downloaded archives.
+data/source/
+data/output/
+data/work/
+archives/

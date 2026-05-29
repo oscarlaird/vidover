@@ -2,8 +2,7 @@
 __pycache__/
 *.py[cod]
 
-# Local media, generated outputs, temporary clips, and downloaded archives.
-data/source/
-data/output/
+# Large media files — tracked via Git LFS (see .gitattributes).
+# Intermediate work files and the original zip archive are local-only.
 data/work/
 archives/

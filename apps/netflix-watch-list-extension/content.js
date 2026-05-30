@@ -214,6 +214,8 @@ function ensureOverlayVideo() {
     pointerEvents: 'none',
     objectFit: 'fill',
     background: 'transparent',
+    opacity: '0.5',
+    outline: '3px solid hotpink',
   });
   document.documentElement.appendChild(overlay);
   return overlay;
@@ -242,8 +244,8 @@ function positionOverlayVideo(overlay) {
   if (!videoRect) return false;
 
   Object.assign(overlay.style, {
-    left: `${videoRect.x}px`,
-    top: `${videoRect.y}px`,
+    left: `${videoRect.x + 50}px`,
+    top: `${videoRect.y + 50}px`,
     width: `${videoRect.width}px`,
     height: `${videoRect.height}px`,
     display: 'block',

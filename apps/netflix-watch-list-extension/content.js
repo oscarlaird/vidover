@@ -19,17 +19,27 @@ let overlayBlobSourceUrl = null; // server URL the blob was fetched from
 let overlayBlobLoading = false;  // download in progress?
 
 function fetchVideoBlob(url) {
+  console.log('[vidover] fetchVideoBlob: starting', url);
   return new Promise((resolve, reject) => {
     const port = chrome.runtime.connect({ name: 'videoStream' });
     const chunks = [];
+    let received = 0;
     port.onMessage.addListener(msg => {
-      if (msg.type === 'chunk') {
-        chunks.push(msg.data); // Uint8Array
+      if (msg.type === 'size') {
+        console.log('[vidover] video size:', (msg.bytes / 1024 / 1024).toFixed(1), 'MB');
+      } else if (msg.type === 'chunk') {
+        chunks.push(msg.data);
+        received += msg.data.byteLength;
+        if (chunks.length % 200 === 0) {
+          console.log('[vidover] received', (received / 1024 / 1024).toFixed(1), 'MB so far');
+        }
       } else if (msg.type === 'done') {
+        console.log('[vidover] download complete —', (received / 1024 / 1024).toFixed(1), 'MB, creating blob URL');
         const blob = new Blob(chunks, { type: 'video/mp4' });
         resolve(URL.createObjectURL(blob));
         port.disconnect();
       } else if (msg.type === 'error') {
+        console.error('[vidover] stream error:', msg.error);
         reject(new Error(msg.error));
         port.disconnect();
       }
@@ -41,11 +51,13 @@ function fetchVideoBlob(url) {
 async function loadOverlayBlobUrl(serverUrl) {
   if (overlayBlobSourceUrl === serverUrl && overlayBlobUrl) return; // cache hit
   if (overlayBlobLoading) return;
+  console.log('[vidover] loadOverlayBlobUrl: starting download');
   overlayBlobLoading = true;
   if (overlayBlobUrl) { URL.revokeObjectURL(overlayBlobUrl); overlayBlobUrl = null; }
   try {
     overlayBlobUrl = await fetchVideoBlob(serverUrl);
     overlayBlobSourceUrl = serverUrl;
+    console.log('[vidover] blob URL ready:', overlayBlobUrl);
   } catch (e) {
     console.warn('[vidover] failed to load overlay blob:', e);
     overlayBlobUrl = null;
@@ -189,7 +201,9 @@ async function refreshOverlayMetadata() {
     const result = await chrome.runtime.sendMessage({ type: 'fetchJSON', url: OVERLAY_METADATA_URL });
     if (!result.ok) throw new Error(result.error);
     overlayMetadata = result.data;
+    console.log('[vidover] metadata:', overlayMetadata);
   } catch (error) {
+    console.warn('[vidover] metadata fetch failed:', error);
     overlayMetadata = null;
   }
 }

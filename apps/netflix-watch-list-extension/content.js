@@ -13,6 +13,47 @@ let overlayMetadataTimer = null;
 let overlayMetadata = null;
 let lastUrl = location.href;
 
+// Blob URL cache — avoids re-downloading the overlay file on every sync tick.
+let overlayBlobUrl = null;       // blob:https://... URL used as video.src
+let overlayBlobSourceUrl = null; // server URL the blob was fetched from
+let overlayBlobLoading = false;  // download in progress?
+
+function fetchVideoBlob(url) {
+  return new Promise((resolve, reject) => {
+    const port = chrome.runtime.connect({ name: 'videoStream' });
+    const chunks = [];
+    port.onMessage.addListener(msg => {
+      if (msg.type === 'chunk') {
+        chunks.push(msg.data); // Uint8Array
+      } else if (msg.type === 'done') {
+        const blob = new Blob(chunks, { type: 'video/mp4' });
+        resolve(URL.createObjectURL(blob));
+        port.disconnect();
+      } else if (msg.type === 'error') {
+        reject(new Error(msg.error));
+        port.disconnect();
+      }
+    });
+    port.postMessage({ type: 'start', url });
+  });
+}
+
+async function loadOverlayBlobUrl(serverUrl) {
+  if (overlayBlobSourceUrl === serverUrl && overlayBlobUrl) return; // cache hit
+  if (overlayBlobLoading) return;
+  overlayBlobLoading = true;
+  if (overlayBlobUrl) { URL.revokeObjectURL(overlayBlobUrl); overlayBlobUrl = null; }
+  try {
+    overlayBlobUrl = await fetchVideoBlob(serverUrl);
+    overlayBlobSourceUrl = serverUrl;
+  } catch (e) {
+    console.warn('[vidover] failed to load overlay blob:', e);
+    overlayBlobUrl = null;
+    overlayBlobSourceUrl = null;
+  }
+  overlayBlobLoading = false;
+}
+
 // -- Player dimension tracking --
 
 const PLAYER_SELECTORS = [
@@ -211,16 +252,21 @@ function positionOverlayVideo(overlay) {
 }
 
 function syncOverlayVideo() {
-  const overlayUrl = overlayUrlFromMetadata(overlayMetadata);
+  const serverUrl = overlayUrlFromMetadata(overlayMetadata);
   const netflixVideo = getNetflixVideo();
-  if (!overlayUrl || !netflixVideo || !isWatchPage()) {
+  if (!serverUrl || !netflixVideo || !isWatchPage()) {
     removeOverlayVideo();
     return;
   }
 
+  // Kick off background download if we don't have the blob yet (fire-and-forget).
+  loadOverlayBlobUrl(serverUrl);
+  if (!overlayBlobUrl) return; // not ready yet — will retry on next tick
+
   const overlay = ensureOverlayVideo();
-  if (overlay.src !== overlayUrl) {
-    overlay.src = overlayUrl;
+  if (overlay.dataset.blobSource !== serverUrl) {
+    overlay.src = overlayBlobUrl;
+    overlay.dataset.blobSource = serverUrl;
     overlay.load();
   }
 

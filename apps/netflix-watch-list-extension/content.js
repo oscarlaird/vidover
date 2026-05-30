@@ -145,9 +145,9 @@ function overlayUrlFromMetadata(metadata) {
 
 async function refreshOverlayMetadata() {
   try {
-    const response = await fetch(OVERLAY_METADATA_URL, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Overlay metadata returned ${response.status}`);
-    overlayMetadata = await response.json();
+    const result = await chrome.runtime.sendMessage({ type: 'fetchJSON', url: OVERLAY_METADATA_URL });
+    if (!result.ok) throw new Error(result.error);
+    overlayMetadata = result.data;
   } catch (error) {
     overlayMetadata = null;
   }

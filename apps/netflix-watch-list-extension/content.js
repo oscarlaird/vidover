@@ -3,8 +3,6 @@ const PLAYER_KEY = 'netflix_player_rect';
 const TIMESTAMP_KEY = 'netflix_timestamp';
 const OVERLAY_SERVER_ORIGIN = 'http://127.0.0.1:8765';
 const OVERLAY_METADATA_URL = `${OVERLAY_SERVER_ORIGIN}/metadata.json`;
-const OVERLAY_VIDEO_ID = 'vidover-netflix-overlay-video';
-
 let lastDetectedTitle = null;
 let pollTimer = null;
 let timestampTimer = null;
@@ -13,58 +11,7 @@ let overlayMetadataTimer = null;
 let overlayMetadata = null;
 let lastUrl = location.href;
 
-// Blob URL cache — avoids re-downloading the overlay file on every sync tick.
-let overlayBlobUrl = null;       // blob:https://... URL used as video.src
-let overlayBlobSourceUrl = null; // server URL the blob was fetched from
-let overlayBlobLoading = false;  // download in progress?
-
-function fetchVideoBlob(url) {
-  console.log('[vidover] fetchVideoBlob: starting', url);
-  return new Promise((resolve, reject) => {
-    const port = chrome.runtime.connect({ name: 'videoStream' });
-    const chunks = [];
-    let received = 0;
-    port.onMessage.addListener(msg => {
-      if (msg.type === 'size') {
-        console.log('[vidover] video size:', (msg.bytes / 1024 / 1024).toFixed(1), 'MB');
-      } else if (msg.type === 'chunk') {
-        chunks.push(msg.data);
-        received += msg.data.byteLength;
-        if (chunks.length % 200 === 0) {
-          console.log('[vidover] received', (received / 1024 / 1024).toFixed(1), 'MB so far');
-        }
-      } else if (msg.type === 'done') {
-        console.log('[vidover] download complete —', (received / 1024 / 1024).toFixed(1), 'MB, creating blob URL');
-        const blob = new Blob(chunks, { type: 'video/mp4' });
-        resolve(URL.createObjectURL(blob));
-        port.disconnect();
-      } else if (msg.type === 'error') {
-        console.error('[vidover] stream error:', msg.error);
-        reject(new Error(msg.error));
-        port.disconnect();
-      }
-    });
-    port.postMessage({ type: 'start', url });
-  });
-}
-
-async function loadOverlayBlobUrl(serverUrl) {
-  if (overlayBlobSourceUrl === serverUrl && overlayBlobUrl) return; // cache hit
-  if (overlayBlobLoading) return;
-  console.log('[vidover] loadOverlayBlobUrl: starting download');
-  overlayBlobLoading = true;
-  if (overlayBlobUrl) { URL.revokeObjectURL(overlayBlobUrl); overlayBlobUrl = null; }
-  try {
-    overlayBlobUrl = await fetchVideoBlob(serverUrl);
-    overlayBlobSourceUrl = serverUrl;
-    console.log('[vidover] blob URL ready:', overlayBlobUrl);
-  } catch (e) {
-    console.warn('[vidover] failed to load overlay blob:', e);
-    overlayBlobUrl = null;
-    overlayBlobSourceUrl = null;
-  }
-  overlayBlobLoading = false;
-}
+const OVERLAY_IFRAME_ID = 'vidover-netflix-overlay-iframe';
 
 // -- Player dimension tracking --
 
@@ -208,61 +155,51 @@ async function refreshOverlayMetadata() {
   }
 }
 
-function ensureOverlayVideo() {
-  let overlay = document.getElementById(OVERLAY_VIDEO_ID);
-  if (overlay) return overlay;
-
-  overlay = document.createElement('video');
-  overlay.id = OVERLAY_VIDEO_ID;
-  overlay.muted = true;
-  overlay.playsInline = true;
-  overlay.preload = 'auto';
-  overlay.crossOrigin = 'anonymous';
-  Object.assign(overlay.style, {
-    position: 'fixed',
-    left: '0px',
-    top: '0px',
-    width: '0px',
-    height: '0px',
-    zIndex: '2147483647',
-    pointerEvents: 'none',
-    objectFit: 'fill',
-    background: 'transparent',
-    opacity: '0.5',
-    outline: '3px solid hotpink',
-  });
-  document.documentElement.appendChild(overlay);
-  return overlay;
+function ensureOverlayIframe(src) {
+  let iframe = document.getElementById(OVERLAY_IFRAME_ID);
+  if (!iframe) {
+    iframe = document.createElement('iframe');
+    iframe.id = OVERLAY_IFRAME_ID;
+    Object.assign(iframe.style, {
+      position: 'fixed',
+      left: '0px',
+      top: '0px',
+      width: '0px',
+      height: '0px',
+      zIndex: '2147483647',
+      pointerEvents: 'none',
+      border: '3px solid hotpink',
+      opacity: '0.5',
+      background: 'transparent',
+    });
+    iframe.src = chrome.runtime.getURL('player.html') + '?src=' + encodeURIComponent(src);
+    document.documentElement.appendChild(iframe);
+  }
+  return iframe;
 }
 
-function removeOverlayVideo() {
-  const overlay = document.getElementById(OVERLAY_VIDEO_ID);
-  if (overlay) overlay.remove();
+function removeOverlayIframe() {
+  const iframe = document.getElementById(OVERLAY_IFRAME_ID);
+  if (iframe) iframe.remove();
 }
 
-function positionOverlayVideo(overlay) {
+function positionOverlayIframe(iframe) {
   const player = getPlayerElement();
   const netflixVideo = getNetflixVideo();
   if (!player || !netflixVideo) return false;
 
   const playerRect = player.getBoundingClientRect();
   const videoRect = calcVideoContentRect(
-    {
-      x: playerRect.x,
-      y: playerRect.y,
-      width: playerRect.width,
-      height: playerRect.height,
-    },
+    { x: playerRect.x, y: playerRect.y, width: playerRect.width, height: playerRect.height },
     netflixVideo
   );
   if (!videoRect) return false;
 
-  Object.assign(overlay.style, {
+  Object.assign(iframe.style, {
     left: `${videoRect.x + 50}px`,
     top: `${videoRect.y + 50}px`,
     width: `${videoRect.width}px`,
     height: `${videoRect.height}px`,
-    display: 'block',
   });
   return true;
 }
@@ -271,35 +208,23 @@ function syncOverlayVideo() {
   const serverUrl = overlayUrlFromMetadata(overlayMetadata);
   const netflixVideo = getNetflixVideo();
   if (!serverUrl || !netflixVideo || !isWatchPage()) {
-    removeOverlayVideo();
+    removeOverlayIframe();
     return;
   }
 
-  // Kick off background download if we don't have the blob yet (fire-and-forget).
-  loadOverlayBlobUrl(serverUrl);
-  if (!overlayBlobUrl) return; // not ready yet — will retry on next tick
-
-  const overlay = ensureOverlayVideo();
-  if (overlay.dataset.blobSource !== serverUrl) {
-    overlay.src = overlayBlobUrl;
-    overlay.dataset.blobSource = serverUrl;
-    overlay.load();
-  }
-
-  if (!positionOverlayVideo(overlay)) return;
+  const iframe = ensureOverlayIframe(serverUrl);
+  if (!positionOverlayIframe(iframe)) return;
 
   const offset = Number(overlayMetadata.syncOffsetSeconds || 0);
   const targetTime = Math.max(0, netflixVideo.currentTime + offset);
-  if (Number.isFinite(targetTime) && Math.abs(overlay.currentTime - targetTime) > 0.12) {
-    overlay.currentTime = targetTime;
-  }
 
-  overlay.playbackRate = netflixVideo.playbackRate || 1;
-  if (netflixVideo.paused || netflixVideo.ended) {
-    overlay.pause();
-  } else {
-    overlay.play().catch(() => {});
-  }
+  iframe.contentWindow?.postMessage({
+    type: 'vidover',
+    src: serverUrl,
+    time: targetTime,
+    rate: netflixVideo.playbackRate || 1,
+    paused: netflixVideo.paused || netflixVideo.ended,
+  }, '*');
 }
 
 function startOverlayTracking() {

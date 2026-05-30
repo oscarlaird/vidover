@@ -24,6 +24,12 @@
   "background": {
     "service_worker": "background.js"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["player.html", "player.js"],
+      "matches": ["https://www.netflix.com/*"]
+    }
+  ],
   "content_scripts": [
     {
       "matches": ["https://www.netflix.com/*"],

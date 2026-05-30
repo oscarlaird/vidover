@@ -172,6 +172,7 @@ function ensureOverlayIframe(src) {
       opacity: '0.5',
       background: 'transparent',
     });
+    iframe.allow = 'autoplay';
     iframe.src = chrome.runtime.getURL('player.html') + '?src=' + encodeURIComponent(src);
     document.documentElement.appendChild(iframe);
   }

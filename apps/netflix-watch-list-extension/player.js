@@ -1,6 +1,16 @@
 const video = document.getElementById('v');
 const src = new URLSearchParams(location.search).get('src');
-if (src) video.src = src;
+
+console.log('[vidover player] loaded, src=', src);
+
+if (src) {
+  video.src = src;
+  video.load();
+}
+
+video.addEventListener('error', e => console.error('[vidover player] video error:', video.error));
+video.addEventListener('canplay', () => console.log('[vidover player] canplay'));
+video.addEventListener('playing', () => console.log('[vidover player] playing'));
 
 window.addEventListener('message', e => {
   const msg = e.data;

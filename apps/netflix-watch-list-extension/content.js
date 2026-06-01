@@ -197,8 +197,8 @@ function positionOverlayIframe(iframe) {
   if (!videoRect) return false;
 
   Object.assign(iframe.style, {
-    left: `${videoRect.x + 50}px`,
-    top: `${videoRect.y + 50}px`,
+    left: `${videoRect.x}px`,
+    top: `${videoRect.y}px`,
     width: `${videoRect.width}px`,
     height: `${videoRect.height}px`,
   });

@@ -23,9 +23,16 @@ window.addEventListener('message', e => {
     video.src = msg.src;
     video.load();
   }
-  if (Number.isFinite(msg.time) && Math.abs(video.currentTime - msg.time) > 0.12) {
-    video.currentTime = msg.time;
-  }
   video.playbackRate = msg.rate || 1;
-  if (msg.paused) video.pause(); else video.play().catch(() => {});
+  if (msg.paused) {
+    video.pause();
+    if (Number.isFinite(msg.time) && Math.abs(video.currentTime - msg.time) > 0.12) {
+      video.currentTime = msg.time;
+    }
+  } else {
+    if (Number.isFinite(msg.time) && Math.abs(video.currentTime - msg.time) > 0.12) {
+      video.currentTime = msg.time;
+    }
+    video.play().catch(() => {});
+  }
 });

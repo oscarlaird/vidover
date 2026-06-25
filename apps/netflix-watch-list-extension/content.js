@@ -205,14 +205,34 @@ function positionOverlayIframe(iframe) {
   return true;
 }
 
+// Events on the Netflix <video> that should immediately re-sync the overlay,
+// so play/pause/seek/rate changes are reflected without waiting for the timer.
+const NETFLIX_VIDEO_EVENTS = ['play', 'pause', 'seeking', 'seeked', 'ratechange', 'timeupdate'];
+let trackedVideoEl = null;
+
+function detachVideoSyncListeners() {
+  if (!trackedVideoEl) return;
+  for (const ev of NETFLIX_VIDEO_EVENTS) trackedVideoEl.removeEventListener(ev, syncOverlayVideo);
+  trackedVideoEl = null;
+}
+
+function ensureVideoSyncListeners(videoEl) {
+  if (videoEl === trackedVideoEl) return;
+  detachVideoSyncListeners();
+  trackedVideoEl = videoEl;
+  for (const ev of NETFLIX_VIDEO_EVENTS) videoEl.addEventListener(ev, syncOverlayVideo);
+}
+
 function syncOverlayVideo() {
   const serverUrl = overlayUrlFromMetadata(overlayMetadata);
   const netflixVideo = getNetflixVideo();
   if (!serverUrl || !netflixVideo || !isWatchPage()) {
+    detachVideoSyncListeners();
     removeOverlayIframe();
     return;
   }
 
+  ensureVideoSyncListeners(netflixVideo);
   const iframe = ensureOverlayIframe(serverUrl);
   if (!positionOverlayIframe(iframe)) return;
 
@@ -248,7 +268,8 @@ function stopOverlayTracking() {
     overlaySyncTimer = null;
   }
   overlayMetadata = null;
-  removeOverlayVideo();
+  detachVideoSyncListeners();
+  removeOverlayIframe();
 }
 
 function isWatchPage() {

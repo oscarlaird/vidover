@@ -1,15 +1,41 @@
 const STORAGE_KEY = 'netflix_watch_list';
 const PLAYER_KEY = 'netflix_player_rect';
 const TIMESTAMP_KEY = 'netflix_timestamp';
-const OVERLAY_SERVER_ORIGIN = 'http://127.0.0.1:8765';
-const OVERLAY_METADATA_URL = `${OVERLAY_SERVER_ORIGIN}/metadata.json`;
+
+// -- Cloudflare overlay config --
+const CF_VIDEO_ID = 'e9e6ea4715c535e58b1528607985a27d';
+const CF_BASE = `https://customer-ft9ftep4ttvcv7mg.cloudflarestream.com/${CF_VIDEO_ID}`;
+const CLOUDFLARE_OVERLAY = {
+  enabled: true,
+  overlayUrl: `${CF_BASE}/manifest/video.m3u8`,
+  dashUrl:    `${CF_BASE}/manifest/video.mpd`,
+  filename: 'sunglasses_full',
+  syncOffsetSeconds: 0,
+};
+
+// -- Local overlay server (commented out — replaced by Cloudflare) --
+// const OVERLAY_SERVER_ORIGIN = 'http://127.0.0.1:8765';
+// const OVERLAY_METADATA_URL = `${OVERLAY_SERVER_ORIGIN}/metadata.json`;
+// async function refreshOverlayMetadata() {
+//   try {
+//     const result = await chrome.runtime.sendMessage({ type: 'fetchJSON', url: OVERLAY_METADATA_URL });
+//     if (!result.ok) throw new Error(result.error);
+//     overlayMetadata = result.data;
+//     console.log('[vidover] metadata:', overlayMetadata);
+//   } catch (error) {
+//     console.warn('[vidover] metadata fetch failed:', error);
+//     overlayMetadata = null;
+//   }
+// }
+
 let lastDetectedTitle = null;
 let pollTimer = null;
 let timestampTimer = null;
 let overlaySyncTimer = null;
 let overlayMetadataTimer = null;
-let overlayMetadata = null;
+let overlayMetadata = CLOUDFLARE_OVERLAY;
 let lastUrl = location.href;
+let lastSentState = null;
 
 const OVERLAY_IFRAME_ID = 'vidover-netflix-overlay-iframe';
 
@@ -135,24 +161,11 @@ function stopTimestampTracking() {
   chrome.storage.local.remove(TIMESTAMP_KEY);
 }
 
-// -- Local overlay video sync --
+// -- Cloudflare overlay video sync --
 
 function overlayUrlFromMetadata(metadata) {
   if (!metadata || !metadata.enabled || !metadata.overlayUrl) return null;
-  if (/^https?:\/\//i.test(metadata.overlayUrl)) return metadata.overlayUrl;
-  return `${OVERLAY_SERVER_ORIGIN}${metadata.overlayUrl}`;
-}
-
-async function refreshOverlayMetadata() {
-  try {
-    const result = await chrome.runtime.sendMessage({ type: 'fetchJSON', url: OVERLAY_METADATA_URL });
-    if (!result.ok) throw new Error(result.error);
-    overlayMetadata = result.data;
-    console.log('[vidover] metadata:', overlayMetadata);
-  } catch (error) {
-    console.warn('[vidover] metadata fetch failed:', error);
-    overlayMetadata = null;
-  }
+  return metadata.overlayUrl;
 }
 
 function ensureOverlayIframe(src) {
@@ -182,6 +195,7 @@ function ensureOverlayIframe(src) {
 function removeOverlayIframe() {
   const iframe = document.getElementById(OVERLAY_IFRAME_ID);
   if (iframe) iframe.remove();
+  lastSentState = null;
 }
 
 function positionOverlayIframe(iframe) {
@@ -224,50 +238,53 @@ function ensureVideoSyncListeners(videoEl) {
 }
 
 function syncOverlayVideo() {
-  const serverUrl = overlayUrlFromMetadata(overlayMetadata);
+  const overlayUrl = overlayUrlFromMetadata(overlayMetadata);
   const netflixVideo = getNetflixVideo();
-  if (!serverUrl || !netflixVideo || !isWatchPage()) {
+  if (!overlayUrl || !netflixVideo || !isWatchPage()) {
     detachVideoSyncListeners();
     removeOverlayIframe();
     return;
   }
 
   ensureVideoSyncListeners(netflixVideo);
-  const iframe = ensureOverlayIframe(serverUrl);
+  const iframe = ensureOverlayIframe(overlayUrl);
   if (!positionOverlayIframe(iframe)) return;
 
   const offset = Number(overlayMetadata.syncOffsetSeconds || 0);
   const targetTime = Math.max(0, netflixVideo.currentTime + offset);
+  const paused = netflixVideo.paused || netflixVideo.ended;
+  const rate = netflixVideo.playbackRate || 1;
+
+  // Only send a message when something meaningful has changed.
+  // While paused, skip redundant messages — repeated pause() calls
+  // can cause the overlay video to flicker in/out of play state.
+  const roundedTime = Math.round(targetTime * 4) / 4; // 0.25s granularity
+  const stateKey = `${paused}|${roundedTime}|${rate}|${overlayUrl}`;
+  if (stateKey === lastSentState) return;
+  lastSentState = stateKey;
 
   iframe.contentWindow?.postMessage({
     type: 'vidover',
-    src: serverUrl,
+    src: overlayUrl,
     time: targetTime,
-    rate: netflixVideo.playbackRate || 1,
-    paused: netflixVideo.paused || netflixVideo.ended,
+    rate,
+    paused,
   }, '*');
 }
 
 function startOverlayTracking() {
-  if (!overlayMetadataTimer) {
-    refreshOverlayMetadata();
-    overlayMetadataTimer = setInterval(refreshOverlayMetadata, 5000);
-  }
+  // No metadata polling needed — overlay config is hardcoded from Cloudflare.
+  // overlayMetadataTimer left unused (local server polling commented out above).
   if (!overlaySyncTimer) {
     overlaySyncTimer = setInterval(syncOverlayVideo, 250);
   }
 }
 
 function stopOverlayTracking() {
-  if (overlayMetadataTimer) {
-    clearInterval(overlayMetadataTimer);
-    overlayMetadataTimer = null;
-  }
   if (overlaySyncTimer) {
     clearInterval(overlaySyncTimer);
     overlaySyncTimer = null;
   }
-  overlayMetadata = null;
   detachVideoSyncListeners();
   removeOverlayIframe();
 }

@@ -6,3 +6,8 @@ __pycache__/
 # Intermediate work files and the original zip archive are local-only.
 data/work/
 archives/
+
+# Local secrets / credentials — never commit.
+.env
+.env.*
+!.env.example

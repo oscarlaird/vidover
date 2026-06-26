@@ -29,7 +29,8 @@
     {
       "resources": [
         "player.html",
-        "player.js"
+        "player.js",
+        "hls.min.js"
       ],
       "matches": [
         "https://www.netflix.com/*"

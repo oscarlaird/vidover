@@ -1,6 +1,8 @@
 const STORAGE_KEY = 'netflix_watch_list';
 const PLAYER_KEY = 'netflix_player_rect';
 const TIMESTAMP_KEY = 'netflix_timestamp';
+const SYNC_DEBUG_KEY = 'netflix_sync_debug';
+const OVERLAY_SEL_KEY = 'netflix_overlay_selection';
 
 function formatDate(isoString) {
   const date = new Date(isoString);
@@ -94,6 +96,65 @@ function renderTimestamp(data) {
   document.getElementById('ts-bar').style.width = `${pct}%`;
 }
 
+function renderOverlaySel(data) {
+  const section = document.getElementById('overlay-section');
+  if (!data || !data.title) {
+    section.classList.add('hidden');
+    return;
+  }
+  section.classList.remove('hidden');
+  const labelEl = document.getElementById('overlay-label');
+  if (data.enabled && data.label) {
+    labelEl.textContent = data.label;
+    labelEl.className = 'overlay-label';
+  } else {
+    labelEl.textContent = 'no match';
+    labelEl.className = 'overlay-label nomatch';
+  }
+  document.getElementById('overlay-title').textContent = data.title;
+}
+
+function fmtSeconds(t) {
+  return (t == null || isNaN(t)) ? '—' : `${t.toFixed(2)}s`;
+}
+
+function renderSync(data) {
+  const section = document.getElementById('sync-section');
+  if (!data || (data.netflixTime == null && data.overlayTime == null)) {
+    section.classList.add('hidden');
+    return;
+  }
+  section.classList.remove('hidden');
+
+  document.getElementById('sync-netflix').textContent = fmtSeconds(data.netflixTime);
+  document.getElementById('sync-overlay').textContent = fmtSeconds(data.overlayTime);
+
+  const deltaEl = document.getElementById('sync-delta');
+  if (data.delta == null || isNaN(data.delta)) {
+    deltaEl.textContent = '—';
+    deltaEl.className = 'stat-value';
+  } else {
+    const d = data.delta;
+    deltaEl.textContent = `${d >= 0 ? '+' : ''}${d.toFixed(2)}s`;
+    const mag = Math.abs(d);
+    deltaEl.className = 'stat-value ' + (mag <= 0.05 ? 'delta-good' : mag <= 0.20 ? 'delta-warn' : 'delta-bad');
+  }
+
+  const stateEl = document.getElementById('sync-state');
+  let label, cls;
+  if (data.err) { label = `error ${data.err}`; cls = 'error'; }
+  else if (data.ready != null && data.ready < 3) { label = 'buffering'; cls = 'buffering'; }
+  else if (data.paused) { label = 'paused'; cls = 'paused'; }
+  else { label = 'playing'; cls = 'playing'; }
+  stateEl.textContent = label;
+  stateEl.className = `sync-state ${cls}`;
+
+  // Dim only if it went stale *while playing* — when paused the static values
+  // are correct and updates legitimately stop.
+  const stale = !data.paused && data.updatedAt && (Date.now() - data.updatedAt > 1500);
+  section.classList.toggle('sync-stale', !!stale);
+}
+
 function px(val) {
   return `${val}<span class="unit">px</span>`;
 }
@@ -134,10 +195,20 @@ function initPopup() {
   getList(renderList);
 
   // Load initial state from storage for all live sections
-  chrome.storage.local.get([PLAYER_KEY, TIMESTAMP_KEY], (result) => {
+  chrome.storage.local.get([PLAYER_KEY, TIMESTAMP_KEY, SYNC_DEBUG_KEY, OVERLAY_SEL_KEY], (result) => {
     renderPlayerRect(result[PLAYER_KEY] || null);
     renderTimestamp(result[TIMESTAMP_KEY] || null);
+    renderSync(result[SYNC_DEBUG_KEY] || null);
+    renderOverlaySel(result[OVERLAY_SEL_KEY] || null);
   });
+
+  // Re-read sync debug on a timer so the readout updates smoothly and the
+  // stale indicator engages when the overlay stops reporting.
+  setInterval(() => {
+    chrome.storage.local.get([SYNC_DEBUG_KEY], (result) => {
+      renderSync(result[SYNC_DEBUG_KEY] || null);
+    });
+  }, 250);
 
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tab = tabs[0];
@@ -158,6 +229,8 @@ function initPopup() {
     if (changes[STORAGE_KEY]) renderList(changes[STORAGE_KEY].newValue || []);
     if (changes[PLAYER_KEY])   renderPlayerRect(changes[PLAYER_KEY].newValue || null);
     if (changes[TIMESTAMP_KEY]) renderTimestamp(changes[TIMESTAMP_KEY].newValue || null);
+    if (changes[SYNC_DEBUG_KEY]) renderSync(changes[SYNC_DEBUG_KEY].newValue || null);
+    if (changes[OVERLAY_SEL_KEY]) renderOverlaySel(changes[OVERLAY_SEL_KEY].newValue || null);
   });
 }
 

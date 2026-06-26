@@ -1,17 +1,58 @@
 const STORAGE_KEY = 'netflix_watch_list';
 const PLAYER_KEY = 'netflix_player_rect';
 const TIMESTAMP_KEY = 'netflix_timestamp';
+const SYNC_DEBUG_KEY = 'netflix_sync_debug';
+const OVERLAY_SEL_KEY = 'netflix_overlay_selection';
 
-// -- Cloudflare overlay config --
-const CF_VIDEO_ID = 'e9e6ea4715c535e58b1528607985a27d';
-const CF_BASE = `https://customer-ft9ftep4ttvcv7mg.cloudflarestream.com/${CF_VIDEO_ID}`;
-const CLOUDFLARE_OVERLAY = {
-  enabled: true,
-  overlayUrl: `${CF_BASE}/manifest/video.m3u8`,
-  dashUrl:    `${CF_BASE}/manifest/video.mpd`,
-  filename: 'sunglasses_full',
-  syncOffsetSeconds: 0,
-};
+// -- Cloudflare Stream overlay library --
+// Each Netflix episode maps to a Cloudflare Stream video. The right overlay is
+// chosen from the title detected on the watch page (show + season/episode).
+const CF_CUSTOMER = 'customer-ft9ftep4ttvcv7mg.cloudflarestream.com';
+const cfManifest = (videoId) => `https://${CF_CUSTOMER}/${videoId}/manifest/video.m3u8`;
+
+const OVERLAY_LIBRARY = [
+  { label: 'Nemesis S01E01', show: /nemesis/i, season: 1, episode: 1,
+    videoId: 'e9e6ea4715c535e58b1528607985a27d', syncOffsetSeconds: 0 },
+  { label: 'Nemesis S01E03', show: /nemesis/i, season: 1, episode: 3,
+    videoId: '3b122812eebf822ef6eb88c959ab5e32', syncOffsetSeconds: 0 },
+];
+
+// Pull season/episode numbers out of a Netflix title string. Handles the common
+// formats: "S1:E3", "S01E03", "Season 1: Episode 3", or a bare "Episode 3".
+function parseEpisode(text) {
+  // "S1:E3", "S01E03", "Season 1: Episode 3"
+  let m = text.match(/s(?:eason)?\s*(\d{1,2})\s*[:x\s]?\s*e(?:pisode)?\s*(\d{1,3})/i);
+  if (m) return { season: Number(m[1]), episode: Number(m[2]) };
+  // "Episode 3" word form.
+  m = text.match(/\bepisode\s*(\d{1,3})/i);
+  if (m) return { season: null, episode: Number(m[1]) };
+  // Short/glued "E3" form, e.g. Netflix's "NemesisE3Tête-À-Tête". Case-sensitive
+  // uppercase E + digits; E must not follow another uppercase letter, so we
+  // don't grab a letter from inside an acronym.
+  m = text.match(/(?:^|[^A-Z])E(\d{1,3})(?!\d)/);
+  if (m) return { season: null, episode: Number(m[1]) };
+  return { season: null, episode: null };
+}
+
+// Choose the overlay whose show matches and whose episode (and season, when
+// both are known) matches the detected title. Returns null if nothing matches —
+// we'd rather show no overlay than the wrong one.
+function selectOverlay(titleText) {
+  if (!titleText) return null;
+  const { season, episode } = parseEpisode(titleText);
+  const hit = OVERLAY_LIBRARY.find((e) =>
+    e.show.test(titleText) &&
+    (e.episode == null || e.episode === episode) &&
+    (e.season == null || season == null || e.season === season));
+  if (!hit) return null;
+  return {
+    enabled: true,
+    label: hit.label,
+    overlayUrl: cfManifest(hit.videoId),
+    videoId: hit.videoId,
+    syncOffsetSeconds: hit.syncOffsetSeconds || 0,
+  };
+}
 
 // -- Local overlay server (commented out — replaced by Cloudflare) --
 // const OVERLAY_SERVER_ORIGIN = 'http://127.0.0.1:8765';
@@ -33,7 +74,8 @@ let pollTimer = null;
 let timestampTimer = null;
 let overlaySyncTimer = null;
 let overlayMetadataTimer = null;
-let overlayMetadata = CLOUDFLARE_OVERLAY;
+let overlayMetadata = null;       // set by refreshOverlaySelection() from the title
+let lastTitleText = null;
 let lastUrl = location.href;
 let lastSentState = null;
 
@@ -168,6 +210,37 @@ function overlayUrlFromMetadata(metadata) {
   return metadata.overlayUrl;
 }
 
+// Combined title text used for overlay matching: the watch-page title element
+// (show + S#:E# + episode title) plus the document title as a fallback.
+function getNetflixTitleText() {
+  const parts = [];
+  const el = document.querySelector('[data-uia="video-title"]');
+  if (el && el.textContent.trim()) parts.push(el.textContent.trim());
+  if (document.title && document.title !== 'Netflix') parts.push(document.title);
+  return parts.join(' | ');
+}
+
+// Re-evaluate which overlay should play for the current title. Cheap to call
+// often — only recomputes (and republishes the debug selection) when the
+// detected title text actually changes.
+function refreshOverlaySelection() {
+  const titleText = getNetflixTitleText();
+  if (titleText === lastTitleText) return;
+  lastTitleText = titleText;
+  overlayMetadata = selectOverlay(titleText);
+  const label = overlayMetadata ? overlayMetadata.label : null;
+  console.log('[vidover] title:', JSON.stringify(titleText), '=> overlay:', label || '(none)');
+  chrome.storage.local.set({
+    [OVERLAY_SEL_KEY]: {
+      title: titleText || null,
+      label,
+      videoId: overlayMetadata ? overlayMetadata.videoId : null,
+      enabled: !!overlayMetadata,
+      updatedAt: Date.now(),
+    },
+  });
+}
+
 function ensureOverlayIframe(src) {
   let iframe = document.getElementById(OVERLAY_IFRAME_ID);
   if (!iframe) {
@@ -221,7 +294,7 @@ function positionOverlayIframe(iframe) {
 
 // Events on the Netflix <video> that should immediately re-sync the overlay,
 // so play/pause/seek/rate changes are reflected without waiting for the timer.
-const NETFLIX_VIDEO_EVENTS = ['play', 'pause', 'seeking', 'seeked', 'ratechange', 'timeupdate'];
+const NETFLIX_VIDEO_EVENTS = ['play', 'pause', 'seeking', 'seeked', 'ratechange', 'timeupdate', 'waiting', 'playing'];
 let trackedVideoEl = null;
 
 function detachVideoSyncListeners() {
@@ -238,6 +311,7 @@ function ensureVideoSyncListeners(videoEl) {
 }
 
 function syncOverlayVideo() {
+  refreshOverlaySelection();
   const overlayUrl = overlayUrlFromMetadata(overlayMetadata);
   const netflixVideo = getNetflixVideo();
   if (!overlayUrl || !netflixVideo || !isWatchPage()) {
@@ -252,7 +326,10 @@ function syncOverlayVideo() {
 
   const offset = Number(overlayMetadata.syncOffsetSeconds || 0);
   const targetTime = Math.max(0, netflixVideo.currentTime + offset);
-  const paused = netflixVideo.paused || netflixVideo.ended;
+  // Hold the overlay (treat as paused) while Netflix is scrubbing or buffering,
+  // so it doesn't run ahead of a frozen Netflix frame and snap back later.
+  const stalled = netflixVideo.seeking || netflixVideo.readyState < 3; // < HAVE_FUTURE_DATA
+  const paused = netflixVideo.paused || netflixVideo.ended || stalled;
   const rate = netflixVideo.playbackRate || 1;
 
   // Only send a message when something meaningful has changed.
@@ -287,7 +364,34 @@ function stopOverlayTracking() {
   }
   detachVideoSyncListeners();
   removeOverlayIframe();
+  chrome.storage.local.remove(SYNC_DEBUG_KEY);
+  chrome.storage.local.remove(OVERLAY_SEL_KEY);
+  overlayMetadata = null;
+  lastTitleText = null;
 }
+
+// Receive actual overlay playback state from the player iframe and store a
+// matched-instant Netflix-vs-overlay comparison for the popup debug readout.
+window.addEventListener('message', (e) => {
+  const msg = e.data;
+  if (!msg || msg.type !== 'vidover-status') return;
+  const offset = Number((overlayMetadata && overlayMetadata.syncOffsetSeconds) || 0);
+  const netflixTime = Number.isFinite(msg.target) ? msg.target - offset : null;
+  const overlayTime = Number.isFinite(msg.overlayTime) ? msg.overlayTime : null;
+  const delta = (netflixTime != null && overlayTime != null) ? overlayTime - netflixTime : null;
+  chrome.storage.local.set({
+    [SYNC_DEBUG_KEY]: {
+      netflixTime,
+      overlayTime,
+      delta,
+      ready: msg.ready,
+      err: msg.err || 0,
+      paused: !!msg.paused,
+      rate: msg.rate || 1,
+      updatedAt: Date.now(),
+    },
+  });
+});
 
 function isWatchPage() {
   return /netflix\.com\/watch\//i.test(location.href);

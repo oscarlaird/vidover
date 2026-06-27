@@ -2,11 +2,11 @@
 
 **Effective Date:** June 27, 2026
 
-This privacy policy describes how the Vidover project ("we", "our", or "us") handles information when you use our Netflix Watch List Extension and related tools.
+This privacy policy describes how the MovieModder project ("we", "our", or "us") handles information when you use our Netflix Watch List Extension and related tools.
 
 ## Overview
 
-Vidover is designed with privacy in mind. All data collected by our extension is stored locally on your device and is never transmitted to our servers. We do not track, analyze, or monetize your data.
+MovieModder is designed with privacy in mind. All data collected by our extension is stored locally on your device and is never transmitted to our servers. We do not track, analyze, or monetize your data.
 
 ## Data Collection
 
@@ -71,8 +71,8 @@ We may update this privacy policy from time to time. Changes will be reflected w
 
 ## Contact
 
-If you have questions about this privacy policy, please open an issue on our [GitHub repository](https://github.com/simonlaird/vidover).
+If you have questions about this privacy policy, please open an issue on our [GitHub repository](https://github.com/oscarlaird/vidover).
 
 ---
 
-*This privacy policy applies to the Vidover Chrome extension and related tools.*
+*This privacy policy applies to the MovieModder Chrome extension and related tools.*
